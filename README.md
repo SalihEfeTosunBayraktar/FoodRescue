@@ -2,7 +2,19 @@
 
 Restoran, fırın ve yemekhanelerin arta kalan hijyenik gıdasını; ihtiyaç sahiplerine (askıda yemek) ve hayvan barınaklarına, **kuryesiz** ve **QR kodla yerinden teslim** modeliyle ulaştıran dayanışma platformu.
 
-Bu depo bir **okul projesi iskeletidir ve öğrenme malzemesidir**: 5 kişilik bir ekibin her üyesi bir modülün sahibidir, her modül hem çalışan profesyonel kod hem de ders notları, SQL çalışma defteri ve alıştırmalar içerir.
+> **Örnek okul proje ödevi.** Bu depo, bilgisayar mühendisliği öğrencilerinin **programlama dilleri** ve **veritabanına giriş** derslerinde bir dönem projesini nasıl kurabileceğine dair eksiksiz, çalışan bir örnektir. Python (FastAPI), JavaScript (framework'süz ES modülleri) ve SQL'i tek bir gerçek uygulamada birleştirir. 5 kişilik ekip için 5 modüle bölünmüştür; her modülde ders notları, çalıştırılabilir SQL çalışma defteri ve alıştırmalar vardır. Kopyalayıp kendi ödeviniz için başlangıç noktası yapabilir, ama kodu okuyup anlamadan teslim etmemenizi öneririz: asıl değer okuma planında ve alıştırmalardadır.
+
+## Ekran görüntüleri
+
+| Ana sayfa | Bağış akışı ve harita | QR + PIN cüzdanı |
+| --- | --- | --- |
+| ![Ana sayfa](screenshots/masaustu/01_ziyaretci_ana_sayfa.png) | ![Bağış akışı](screenshots/masaustu/02_ziyaretci_bagis_akisi.png) | ![QR cüzdanı](screenshots/masaustu/12_yararlanici_cuzdan_qr_pin.png) |
+
+| Teslim masası (bağışçı) | Yönetici paneli | Mobil |
+| --- | --- | --- |
+| ![Teslim masası](screenshots/masaustu/18_bagisci_teslim_onaylandi.png) | ![Yönetici](screenshots/masaustu/26_yonetici_genel_bakis.png) | ![Mobil](screenshots/mobil/06_cuzdan_qr_pin.png) |
+
+Tüm ekranlar (42 görüntü, her rol, masaüstü ve mobil): [`screenshots/`](screenshots/). Yenilemek için `python tools/screenshots.py`.
 
 > Proje adı henüz kesinleşmedi. "FoodRescue" çalışma adıdır; tek bir yerden (`app/config/settings.py`, `web/config/strings.js`) değiştirilir.
 
