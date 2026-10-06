@@ -10,13 +10,18 @@ from app.modules.inventory import service
 from app.modules.inventory.models import FoodCategory
 from app.modules.inventory.schemas import FoodCreate, FoodOut, FoodUpdate
 
+# Bu modülün tüm yolları /api/v1/foods ile başlar.
 router = APIRouter(prefix="/api/v1/foods", tags=["inventory"])
 
+# Onaylı bağışçı gerektiren bağımlılık, tekrar yazmamak için bir kez tanımlandı.
 _donor = active_user(UserRole.DONOR)
 
 
+# Herkese açık: ziyaretçi giriş yapmadan ilanlara bakabilir (kayıt olmaya teşvik eder).
 @router.get("", response_model=list[FoodOut])
 def list_foods(
+    # Sorgu parametreleri (`?category=HUMAN&lat=..`). Query(...) ile aralıklar doğrulanır: geçersiz
+    # enlem 422 döner.
     category: FoodCategory | None = None,
     q: str | None = Query(default=None, max_length=100),
     lat: float | None = Query(default=None, ge=-90, le=90),
@@ -29,31 +34,39 @@ def list_foods(
     return [service.to_out(food, distance) for food, distance in rows]
 
 
+# ÖNEMLİ: '/mine', '/{food_id}' yolundan ÖNCE tanımlanmalı. Aksi halde FastAPI 'mine' kelimesini
+# sayı bekleyen food_id sanır ve 422 verir. Yol sırası önemlidir.
 @router.get("/mine", response_model=list[FoodOut])
 def my_foods(donor: User = Depends(_donor), db: Session = Depends(get_db)):
     return [service.to_out(food) for food in service.donor_foods(db, donor)]
 
 
+# Tek ilan detayı, herkese açık.
 @router.get("/{food_id}", response_model=FoodOut)
 def get_food(food_id: int, db: Session = Depends(get_db)):
     return service.to_out(service.get_food(db, food_id))
 
 
+# 201 Created: yeni kaynak oluşturulduğunu belirtir.
 @router.post("", response_model=FoodOut, status_code=201)
 def create_food(payload: FoodCreate, donor: User = Depends(_donor), db: Session = Depends(get_db)):
     return service.to_out(service.create_food(db, donor, payload))
 
 
+# PATCH: kısmi güncelleme (PUT ise tüm kaydı değiştirmek anlamına gelir).
 @router.patch("/{food_id}", response_model=FoodOut)
 def update_food(food_id: int, payload: FoodUpdate, donor: User = Depends(_donor), db: Session = Depends(get_db)):
     return service.to_out(service.update_food(db, donor, food_id, payload))
 
 
+# DELETE ilanı silmez, CANCELLED durumuna alır (mantıksal silme / soft delete): denetim ve
+# rezervasyon geçmişi korunur.
 @router.delete("/{food_id}", response_model=FoodOut)
 def cancel_food(food_id: int, actor: User = Depends(current_user), db: Session = Depends(get_db)):
     return service.to_out(service.cancel_food(db, actor, food_id))
 
 
+# multipart/form-data ile dosya yükleme. `File(...)` zorunlu dosya alanıdır.
 @router.post("/{food_id}/photo", response_model=FoodOut)
 def upload_photo(
     food_id: int, file: UploadFile = File(...), donor: User = Depends(_donor), db: Session = Depends(get_db)

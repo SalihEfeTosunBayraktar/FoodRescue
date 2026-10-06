@@ -7,10 +7,14 @@ import { formatDateTime } from '../../core/format.js';
 import { button, emptyState, toast } from '../../core/ui.js';
 
 // Bell with an unread counter, shown in the header while logged in. Returns { el, destroy }.
+// Başlıktaki zil ve okunmamış sayacı. Dönen nesnenin destroy() fonksiyonu zamanlayıcıyı kapatır
+// (çıkış yapınca çağrılır).
 function bellWidget() {
+  // hidden: sayı sıfırken rozet görünmez.
   const counter = h('span', { class: 'bell-count', hidden: true });
   const el = h('a', { class: 'icon-btn bell', href: '#/notifications', 'aria-label': t('notifications.title') }, icon('bell'), counter);
 
+  // Okunmamış sayısını çeker. Hata olursa son değer korunur (ağ kesintisinde zil yanıp sönmez).
   async function refresh() {
     try {
       const { unread } = await api('/notifications');
@@ -19,18 +23,24 @@ function bellWidget() {
     } catch { /* offline or logged out: keep the last value */ }
   }
   refresh();
+  // Düzenli sorgulama (polling). Anlık iletim için SSE/WebSocket gerekir (README alıştırması).
   const timer = setInterval(refresh, CONFIG.intervals.notifications);
+  // Sayfa değişince de tazele: bildirim kutusunu okuyunca sayaç hemen düşer.
   window.addEventListener('hashchange', refresh);
+  // Widget sözleşmesi: bir eleman ve bir temizlik fonksiyonu.
   return { el, destroy: () => { clearInterval(timer); window.removeEventListener('hashchange', refresh); } };
 }
 
+// Bildirim kutusu sayfası.
 async function inboxPage() {
   const list = h('div', { class: 'stack' });
 
+  // Bildirimleri çeker ve listeyi baştan çizer.
   async function load() {
     const { items, unread } = await api('/notifications');
     list.replaceChildren(...(items.length ? items.map((item) => h('article', {
       class: `card notification ${item.read_at ? '' : 'is-unread'}`,
+      // Karta tıklayınca okundu işaretlenir (zaten okunduysa istek atılmaz).
       onClick: async () => { if (!item.read_at) { await api(`/notifications/${item.id}/read`, { method: 'POST' }); load(); } },
     },
       h('div', { class: 'card-head' }, h('strong', {}, item.title), h('span', { class: 'muted small' }, formatDateTime(item.created_at))),
@@ -48,9 +58,11 @@ async function inboxPage() {
   return h('section', { class: 'narrow' }, h('div', { class: 'page-head' }, h('h1', {}, t('notifications.title')), readAll), list);
 }
 
+// Modülün dışa açılan yüzeyi.
 export default {
   name: 'notification',
   routes: [{ path: '/notifications', auth: true, render: inboxPage }],
   nav: () => [],
+  // Ana kabuk (main.js) bu parçayı başlığa yerleştirir.
   headerWidget: bellWidget,
 };

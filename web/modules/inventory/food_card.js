@@ -4,14 +4,20 @@ import { t } from '../../core/i18n.js';
 import { formatDistance, formatTime, timeLeft } from '../../core/format.js';
 import { badge } from '../../core/ui.js';
 
+// Kategoriye göre ikon seçimi.
 export const categoryIcon = (category) => (category === 'ANIMAL' ? 'paw' : 'utensils');
 
+// Fotoğraf varsa onu, yoksa kategori renginde ikonlu yer tutucu gösterir. loading='lazy': ekran
+// dışındaki görseller kaydırılınca yüklenir.
 export function foodThumb(food) {
   if (food.photo_url) return h('img', { class: 'thumb', src: food.photo_url, alt: '', loading: 'lazy' });
   return h('div', { class: `thumb thumb-${food.category.toLowerCase()}` }, icon(categoryIcon(food.category), { size: 28 }));
 }
 
+// Bir ilan kartı. Tüm kart tek bir bağlantıdır (<a>): klavye ve ekran okuyucuyla da kullanılabilir.
 export function foodCard(food, { onHover } = {}) {
+  // dataset.id: kartı sonradan bulmak için (haritada işaretçiye tıklanınca kaydırma). onMouseenter:
+  // kartın üzerine gelince haritada işaretçi vurgulanır.
   const card = h('a', { class: 'card food-card', href: `#/foods/${food.id}`, dataset: { id: food.id }, onMouseenter: () => onHover?.(food) },
     foodThumb(food),
     h('div', { class: 'food-body' },

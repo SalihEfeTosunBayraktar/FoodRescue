@@ -26,11 +26,14 @@ from app.config.settings import load_settings  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.seed import DEMO_ACCOUNTS, DEMO_PASSWORD, seed_demo  # noqa: E402
 
+# SCREENSHOT_DIR ortam değişkeni verilirse testler ekran görüntüsü de kaydeder.
 SHOTS = Path(os.environ["SCREENSHOT_DIR"]) if os.environ.get("SCREENSHOT_DIR") else None
 # External tile/CDN failures are environment noise, not application errors.
+# Dış kaynaklardan (harita karoları, CDN) gelen ağ hataları uygulama hatası sayılmaz.
 IGNORED_ERRORS = ("tile.openstreetmap.org", "unpkg.com", "ERR_INTERNET_DISCONNECTED", "ERR_NAME_NOT_RESOLVED", "Failed to load resource")
 
 
+# İşletim sisteminden boş bir port ister: sabit port çakışmasını önler.
 def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
@@ -38,6 +41,8 @@ def _free_port() -> int:
 
 
 @pytest.fixture(scope="module")
+# Testler için gerçek bir sunucu (uvicorn) arka plan thread'inde başlatılır, bitince kapatılır.
+# scope='module': dosyadaki tüm testler aynı sunucuyu paylaşır (hız).
 def base_url(tmp_path_factory):
     tmp = tmp_path_factory.mktemp("e2e")
     settings = replace(
@@ -63,6 +68,7 @@ def base_url(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
+# Playwright ile gerçek Chromium. Kurulu değilse testler atlanır (skip), hata vermez.
 def browser():
     with playwright_sync.sync_playwright() as p:
         try:
@@ -73,6 +79,8 @@ def browser():
         instance.close()
 
 
+# Bir kullanıcıyı (tarayıcı bağlamı) temsil eder: kendi çerezleri ve depolaması vardır. Konsol
+# hatalarını kaydeder.
 class Session:
     """One browser context (= one user) that records console errors."""
 
@@ -84,10 +92,12 @@ class Session:
         self.page.on("pageerror", lambda exc: self.errors.append(str(exc)))
         self.page.on("console", lambda msg: msg.type == "error" and self.errors.append(msg.text))
 
+    # Sayfayı açar ve ağ boşalana kadar bekler.
     def open(self, hash_: str = "/") -> None:
         self.page.goto(f"{self.base}/#{hash_}")
         self.page.wait_for_load_state("networkidle")
 
+    # Gerçek giriş formunu doldurur: arayüz akışının kendisini de sınar.
     def login(self, role: str) -> None:
         self.open("/login")
         self.page.fill("input[name=email]", DEMO_ACCOUNTS[role])
@@ -109,6 +119,7 @@ class Session:
 
 
 @pytest.fixture()
+# Her test kendi oturumlarını açar; test bitince hepsi kapatılır (yield sonrası temizlik).
 def make_session(browser, base_url):
     sessions: list[Session] = []
 
@@ -122,6 +133,8 @@ def make_session(browser, base_url):
         s.close()
 
 
+# Ziyaretçi akışı: sayaçlar, ilan listesi ve filtreler. wait_for_function: sonucun GELMESİNİ bekler
+# (asenkron arayüzde sabit bekleme yerine koşul beklemek testi hem hızlı hem kararlı yapar).
 def test_home_and_feed_filters(make_session):
     s = make_session()
     s.open("/")
@@ -139,6 +152,9 @@ def test_home_and_feed_filters(make_session):
     assert not s.app_errors(), s.app_errors()
 
 
+# İKİ kullanıcılı gerçek senaryo: yararlanıcı rezerve eder, bağışçı PIN ile teslimi onaylar,
+# yararlanıcı şikâyet eder. İlk deneme yanlış PIN ile yapılır. Ekranda 'null' veya '[object' metni
+# olmaması da denetlenir (eskiden yaşanmış bir hatanın regresyon testi).
 def test_beneficiary_reserves_and_donor_verifies_with_pin(make_session):
     student, donor = make_session(), make_session()
     student.login("beneficiary")
@@ -176,6 +192,7 @@ def test_beneficiary_reserves_and_donor_verifies_with_pin(make_session):
     assert not donor.app_errors(), donor.app_errors()
 
 
+# Yönetici akışı: onay bekleyeni onaylar, denetim kaydında olayı görür.
 def test_admin_approves_pending_donor(make_session):
     admin = make_session()
     admin.login("admin")
@@ -193,6 +210,7 @@ def test_admin_approves_pending_donor(make_session):
     assert not admin.app_errors(), admin.app_errors()
 
 
+# Bağışçı formu doldurup ilan yayınlar.
 def test_donor_creates_listing(make_session):
     donor = make_session()
     donor.login("donor")
@@ -208,6 +226,7 @@ def test_donor_creates_listing(make_session):
     assert not donor.app_errors(), donor.app_errors()
 
 
+# Erişim koruması (girişsiz ve yetkisiz) ile mobil düzen: yatay taşma olmamalı ve menü açılabilmeli.
 def test_guards_and_mobile_layout(make_session):
     anonymous = make_session()
     anonymous.open("/wallet")

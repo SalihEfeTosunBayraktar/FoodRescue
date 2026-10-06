@@ -34,12 +34,14 @@ DESKTOP = {"width": 1280, "height": 900}
 MOBILE = {"width": 390, "height": 844}
 
 
+# Boş bir port bulur.
 def free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         return sock.getsockname()[1]
 
 
+# Bir kullanıcıyı temsil eden tarayıcı bağlamı + ekran görüntüsü sayacı.
 class Shooter:
     def __init__(self, browser, base: str, out: Path, viewport: dict, counter: list[int]) -> None:
         self.base, self.out, self.counter = base, out, counter
@@ -47,6 +49,7 @@ class Shooter:
         self.page = self.context.new_page()
         out.mkdir(parents=True, exist_ok=True)
 
+    # Aynı adrese tekrar gidilirse sayfayı yeniler (aynı hash için tarayıcı gezinme olayı üretmez).
     def open(self, route: str, wait_map: bool = False) -> None:
         target = f"{self.base}/#{route}"
         if self.page.url == target:
@@ -74,6 +77,9 @@ class Shooter:
         self.context.close()
 
 
+# Masaüstü turu: ziyaretçi, yararlanıcı, bağışçı, onay bekleyen, barınak, yönetici ve hata
+# sayfaları. SIRA önemlidir: önce yararlanıcı rezerve eder, bağışçı teslim eder, sonra şikâyet
+# edilir; böylece yönetici ekranlarında gerçek veri görünür.
 def desktop_pass(browser, base: str, out: Path) -> None:
     n = [0]
     anon, student, donor, pending, shelter, admin = (Shooter(browser, base, out, DESKTOP, n) for _ in range(6))
@@ -143,6 +149,7 @@ def desktop_pass(browser, base: str, out: Path) -> None:
         shooter.close()
 
 
+# Aynı akışın mobil ekran boyutundaki önemli sayfaları.
 def mobile_pass(browser, base: str, out: Path) -> None:
     n = [0]
     anon, student, donor, admin = (Shooter(browser, base, out, MOBILE, n) for _ in range(4))
@@ -162,6 +169,7 @@ def mobile_pass(browser, base: str, out: Path) -> None:
         shooter.close()
 
 
+# Geçici sunucu ve veritabanı kurar, görüntüleri alır ve temizler.
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--out", type=Path, default=ROOT / "screenshots")
@@ -171,6 +179,7 @@ def main() -> int:
     for sub in ("masaustu", "mobil"):  # only our own output folders are cleared
         shutil.rmtree(args.out / sub, ignore_errors=True)
 
+    # Geçici klasör: yalnızca bu betiğin kendi oluşturduğu yol silinir.
     work = Path(tempfile.mkdtemp(prefix="foodrescue-shots-"))
     settings = replace(
         load_settings(secret_key="screenshots-secret-key-with-32-bytes!!"),
@@ -178,11 +187,13 @@ def main() -> int:
         upload_dir=work / "uploads",
         maintenance_interval_seconds=0,
     )
+    # Gerçek uygulama, geçici veritabanıyla.
     app = create_app(settings)
     with app.state.db.session() as session:
         seed_demo(session)
     port = free_port()
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    # Sunucu arka plan thread'inde çalışır; ana thread tarayıcıyı sürer.
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     while not server.started:

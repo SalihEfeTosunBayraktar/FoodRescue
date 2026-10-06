@@ -1,5 +1,8 @@
 """All user-facing server texts (errors, notifications, mail subjects). Turkish."""
 
+# Hata mesajı anahtarı -> Türkçe metin. Kod yalnızca anahtarı (örn. 'food.unavailable') bilir. Metni
+# değiştirmek ya da başka dile çevirmek için tek yer burasıdır. {ad} yer tutucular AppError(params)
+# ile doldurulur.
 ERRORS: dict[str, str] = {
     "auth.invalid_credentials": "E-posta veya şifre hatalı.",
     "auth.too_many_attempts": "Çok fazla hatalı deneme. {seconds} saniye sonra tekrar deneyin.",
@@ -37,6 +40,8 @@ ERRORS: dict[str, str] = {
 }
 
 # kind -> (title, body). Placeholders are filled from the event payload.
+# Bildirim türü -> (başlık, gövde) şablonu. Yeni bildirim türü eklemek için buraya şablon,
+# notification/subscribers.py içine eşleme eklenir.
 NOTIFICATIONS: dict[str, tuple[str, str]] = {
     "account.approved": ("Başvurunuz onaylandı", "Hesabınız onaylandı, artık işlem yapabilirsiniz."),
     "account.rejected": ("Başvurunuz reddedildi", "Gerekçe: {note}"),
@@ -48,5 +53,6 @@ NOTIFICATIONS: dict[str, tuple[str, str]] = {
     "reservation.cancelled.beneficiary": ("Rezervasyonunuz iptal edildi", "{food_title} ilanı kaldırıldığı için rezervasyonunuz iptal edildi."),
 }
 
+# Şikâyet eşiği aşılınca askıya alma gerekçesi olarak kayda yazılan metin.
 COMPLAINT_SUSPEND_REASON = "Birden fazla kullanıcıdan şikâyet alındı, inceleme için askıya alındı."
 MAIL_SUBJECT_PREFIX = "[FoodRescue] "

@@ -1,10 +1,13 @@
 from tests.conftest import food_payload
 
 
+# Tekrarı azaltan küçük yardımcı.
 def _reserve(client, headers, food_id):
     return client.post("/api/v1/reservations", json={"food_id": food_id, "portions": 1}, headers=headers)
 
 
+# Olay tabanlı tasarımın kanıtı: reservation modülü bildirim modülünü hiç çağırmaz, ama bildirimler
+# yine de oluşur.
 def test_notifications_follow_the_reservation_lifecycle(client, actors, make_food):
     admin = actors.admin()
     donor_user, donor = actors.donor(admin)
@@ -26,6 +29,7 @@ def test_notifications_follow_the_reservation_lifecycle(client, actors, make_foo
     assert client.get("/api/v1/notifications", headers=donor).json()["unread"] == 0
 
 
+# Başkasının bildirimi okunamaz (404).
 def test_notifications_are_private(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -35,6 +39,7 @@ def test_notifications_are_private(client, actors, make_food):
     assert client.post(f"/api/v1/notifications/{note_id}/read", headers=student).status_code == 404
 
 
+# Hesap onayı başvurana bildirim üretir.
 def test_approval_notifies_the_applicant(client, actors):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -42,6 +47,7 @@ def test_approval_notifies_the_applicant(client, actors):
     assert "account.approved" in kinds
 
 
+# Sayaç dürüstlüğü: yalnızca TESLİM EDİLEN porsiyonlar sayılır, rezerve edilenler değil.
 def test_public_summary_counts_only_collected_pickups(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -57,6 +63,8 @@ def test_public_summary_counts_only_collected_pickups(client, actors, make_food)
     assert mine["portions_rescued"] == 1 and mine["foods_published"] == 1
 
 
+# Şikâyet eşiği: 3 FARKLI kişinin şikâyeti işletmeyi askıya alır; ilanları kaldırılır, bekleyen
+# rezervasyonlar iptal olur ve işletmenin bileti geçersiz kalır.
 def test_three_complaints_suspend_the_donor_and_cancel_their_food(client, actors, make_food):
     admin = actors.admin()
     donor_user, donor = actors.donor(admin)
@@ -79,6 +87,8 @@ def test_three_complaints_suspend_the_donor_and_cancel_their_food(client, actors
     assert client.get("/api/v1/auth/me", headers=donor).status_code == 403
 
 
+# Şikâyet kuralları: yalnızca kendi rezervasyonu, kısa gerekçe reddi, aynı rezervasyon için tek
+# şikâyet, yönetici kararı bir kez.
 def test_complaint_rules(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -98,6 +108,7 @@ def test_complaint_rules(client, actors, make_food):
     assert client.get("/api/v1/admin/complaints", headers=student).status_code == 403
 
 
+# Denetim kaydı önemli olayları içerir ve yalnızca yönetici okuyabilir.
 def test_audit_trail_records_actions_and_is_admin_only(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -113,6 +124,8 @@ def test_audit_trail_records_actions_and_is_admin_only(client, actors, make_food
     assert food_payload()["hygiene_confirmed"] is True
 
 
+# Duman testi (smoke test): uygulama ayağa kalkıyor, tohum veri kuruluyor ve ikinci çalıştırmada bir
+# şey değişmiyor (idempotent).
 def test_health_and_seed_smoke(app, client):
     from app.seed import seed_demo
     with app.state.db.session() as session:
@@ -124,6 +137,7 @@ def test_health_and_seed_smoke(app, client):
     assert len(client.get("/api/v1/foods").json()) >= 5
 
 
+# Paylaşılan örnekte yönetici parolası özel olabilir; demo parolası artık geçmez.
 def test_seed_accepts_private_admin_password(app, client):
     from app.seed import ADMIN_EMAIL, DEMO_PASSWORD, seed_demo
     with app.state.db.session() as session:

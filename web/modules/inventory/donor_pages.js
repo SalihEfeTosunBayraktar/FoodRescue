@@ -8,36 +8,49 @@ import { session } from '../../core/session.js';
 import { badge, button, confirmDialog, emptyState, field, notice, toast, withBusy } from '../../core/ui.js';
 import { foodThumb } from './food_card.js';
 
+// İlan durumu -> etiket rengi.
 const STATUS_TONE = { AVAILABLE: 'ok', EXPIRED: 'neutral', CANCELLED: 'bad' };
 
+// Panodaki sayı kartı.
 function statTile(label, value, iconName) {
   return h('div', { class: 'stat' }, icon(iconName, { size: 22 }), h('div', { class: 'stat-value' }, String(value)), h('div', { class: 'stat-label' }, label));
 }
 
+// Bağışçı paneli: etki sayıları + kendi ilanları.
 export async function donorDashboard() {
   const user = session.user;
+  // Promise.all: iki isteği AYNI ANDA başlatır; toplam süre ikisinin toplamı değil uzun olanın
+  // süresidir. Onaysız bağışçı için istek hiç atılmaz.
   const [foods, impact] = await Promise.all([
     user.status === 'ACTIVE' ? api('/foods/mine') : Promise.resolve([]),
     user.status === 'ACTIVE' ? api('/impact/mine') : Promise.resolve(null),
   ]);
   const list = h('div', { class: 'stack' });
 
+  // Liste boşsa açıklayıcı boş durum gösterir.
   function renderList(items) {
     list.replaceChildren(...(items.length ? items.map(foodRow) : [emptyState(t('donor.foods.empty'), 'utensils')]));
   }
 
+  // Bir ilan satırı: durum, stok, kalan süre ve işlemler.
   function foodRow(food) {
+    // Gizli dosya kutusu: 'Fotoğraf' düğmesi bunu tetikler (özel düğme görünümü için yaygın
+    // yöntem). accept: dosya seçicide yalnızca görseller görünür (sunucu yine de içeriği doğrular).
     const fileInput = h('input', { type: 'file', accept: 'image/jpeg,image/png,image/webp', hidden: true, onChange: async (event) => {
       const file = event.target.files[0];
       if (!file) return;
+      // FormData: dosya yüklemek için multipart gövde.
       const form = new FormData();
+      // Alan adı 'file', sunucudaki UploadFile parametresiyle aynı olmalı.
       form.append('file', file);
       try { await api(`/foods/${food.id}/photo`, { method: 'POST', form }); toast(t('common.saved'), 'success'); navigate('#/donor'); }
       catch (err) { toast(err.message, 'error'); }
     } });
+    // İşlemler yalnızca yayındaki ilanda görünür.
     const actions = food.status === 'AVAILABLE' ? h('div', { class: 'row' },
       button(t('donor.foods.photo'), { variant: 'ghost', iconName: 'image', onClick: () => fileInput.click() }),
       button(t('donor.foods.cancel'), { variant: 'danger', iconName: 'trash', onClick: async () => {
+        // Geri alınamaz işlemden önce onay: bekleyen rezervasyonlar iptal olacak.
         if (!(await confirmDialog(t('donor.foods.cancelConfirm', { title: food.title }), { danger: true }))) return;
         try { await api(`/foods/${food.id}`, { method: 'DELETE' }); toast(t('common.saved'), 'success'); navigate('#/donor'); }
         catch (err) { toast(err.message, 'error'); }
@@ -51,6 +64,7 @@ export async function donorDashboard() {
         actions, fileInput));
   }
 
+  // İlk çizim.
   renderList(foods);
   return h('section', {},
     h('div', { class: 'page-head' }, h('h1', {}, t('donor.title', { name: user.organization_name || user.full_name })),
@@ -65,15 +79,19 @@ export async function donorDashboard() {
     list);
 }
 
+// <input type='datetime-local'> yerel saat ister; UTC'den yerel saate çevirmek için saat dilimi
+// farkı (getTimezoneOffset) çıkarılır.
 function defaultPickupValue() {
   const d = new Date(Date.now() + 2 * 3600 * 1000);
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
   return d.toISOString().slice(0, 16); // value format of <input type="datetime-local">
 }
 
+// İlan formu. Alanlar tek nesnede toplanır.
 export function foodFormPage() {
   const user = session.user;
   const error = h('div');
+  // Giriş kutuları.
   const inputs = {
     title: h('input', { name: 'title', required: true, minlength: 3, maxlength: 200 }),
     description: h('textarea', { name: 'description', rows: 3, maxlength: 1000 }),
@@ -101,9 +119,12 @@ export function foodFormPage() {
             storage: inputs.storage.value,
             portions_total: Number(inputs.portions.value),
             max_per_person: Number(inputs.maxPer.value),
+            // Yerel saati UTC ISO metnine çevirir; sunucu UTC bekler.
             pickup_until: new Date(inputs.until.value).toISOString(),
             hygiene_confirmed: inputs.hygiene.checked,
           } });
+          // Fotoğraf İKİNCİ bir istekle yüklenir (önce ilan oluşur, sonra görsel eklenir). Yükleme
+          // başarısız olsa ilan yine yayında kalır.
           if (inputs.photo.files[0]) {
             const form = new FormData();
             form.append('file', inputs.photo.files[0]);

@@ -1,6 +1,8 @@
 from tests.conftest import PASSWORD
 
 
+# ARRANGE-ACT-ASSERT: hazırla, çalıştır, doğrula. Burada: yararlanıcı kaydolur, giriş yapar ve kendi
+# bilgisini görür; yanıtta parola veya hash'in OLMADIĞI da kanıtlanır.
 def test_beneficiary_registers_active_and_logs_in(client, actors):
     user, headers = actors.beneficiary()
     assert user["status"] == "ACTIVE"
@@ -9,22 +11,26 @@ def test_beneficiary_registers_active_and_logs_in(client, actors):
     assert "password" not in me and "password_hash" not in me
 
 
+# Güvenlik: kimse kendini yönetici yapamaz.
 def test_admin_role_cannot_be_self_registered(client):
     res = client.post("/api/v1/auth/register", json={"email": "x@t.test", "password": PASSWORD, "full_name": "Evil Admin", "role": "ADMIN"})
     assert res.status_code == 403
 
 
+# Aynı e-posta büyük harfle bile ikinci kez kaydedilemez (409).
 def test_duplicate_email_conflict(client, actors):
     user, _ = actors.beneficiary()
     res = client.post("/api/v1/auth/register", json={"email": user["email"].upper(), "password": PASSWORD, "full_name": "Other Person", "role": "BENEFICIARY"})
     assert res.status_code == 409
 
 
+# Bağışçı için zorunlu alanlar eksikse Pydantic 422 döner ve servise hiç ulaşılmaz.
 def test_donor_registration_requires_organization_fields(client):
     res = client.post("/api/v1/auth/register", json={"email": "d@t.test", "password": PASSWORD, "full_name": "Don Or", "role": "DONOR"})
     assert res.status_code == 422
 
 
+# Onay iş akışı: onaylanmadan 403, onaylanınca ilan açılır.
 def test_pending_donor_cannot_publish_until_approved(client, actors, make_food):
     admin = actors.admin()
     user, headers = actors.donor(admin, approve=False)
@@ -35,6 +41,7 @@ def test_pending_donor_cannot_publish_until_approved(client, actors, make_food):
     assert make_food(headers)["status"] == "AVAILABLE"
 
 
+# Kaba kuvvet koruması: 8 hatalı denemeden sonra DOĞRU parola bile 429 alır.
 def test_login_lockout_after_repeated_failures(client, actors):
     user, _ = actors.beneficiary()
     for _ in range(8):
@@ -43,6 +50,7 @@ def test_login_lockout_after_repeated_failures(client, actors):
     assert locked.status_code == 429
 
 
+# Hesap varlığı sızdırılmaz: iki durumda yanıt birebir aynıdır.
 def test_wrong_password_and_unknown_email_look_the_same(client, actors):
     user, _ = actors.beneficiary()
     a = client.post("/api/v1/auth/login", json={"email": user["email"], "password": "nope-nope"})
@@ -51,6 +59,7 @@ def test_wrong_password_and_unknown_email_look_the_same(client, actors):
     assert a.json() == b.json()
 
 
+# Rol kontrolü: bağışçı yönetici uç noktalarına 403 alır.
 def test_only_admin_can_review_and_list_accounts(client, actors):
     admin = actors.admin()
     user, headers = actors.donor(admin, approve=False)
@@ -60,6 +69,8 @@ def test_only_admin_can_review_and_list_accounts(client, actors):
     assert [u["id"] for u in pending] == [user["id"]]
 
 
+# Reddedilen girişte, askıya alınan eski biletle bile 403 alır; yeniden etkinleştirilince erişim
+# geri gelir.
 def test_rejected_and_suspended_accounts_cannot_log_in(client, actors):
     admin = actors.admin()
     user, _ = actors.donor(admin, approve=False)
@@ -74,6 +85,7 @@ def test_rejected_and_suspended_accounts_cannot_log_in(client, actors):
     assert client.get("/api/v1/auth/me", headers=other_headers).status_code == 200
 
 
+# Bilet yoksa veya bozuksa 401.
 def test_missing_and_garbage_tokens_are_401(client):
     assert client.get("/api/v1/auth/me").status_code == 401
     assert client.get("/api/v1/auth/me", headers={"Authorization": "Bearer garbage"}).status_code == 401

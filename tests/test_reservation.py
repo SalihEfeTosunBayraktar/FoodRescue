@@ -4,10 +4,13 @@ from app.core.clock import utcnow
 from app.modules.reservation import service as reservations
 
 
+# Tekrarı azaltan küçük yardımcı.
 def _reserve(client, headers, food_id, portions=1):
     return client.post("/api/v1/reservations", json={"food_id": food_id, "portions": portions}, headers=headers)
 
 
+# Uçtan uca mutlu yol: rezerve et -> stok düşer -> bağışçı gelen listede sır görmez -> PIN ile
+# teslim -> aynı kod ikinci kez çalışmaz.
 def test_full_pickup_flow_with_qr_and_pin(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -31,6 +34,7 @@ def test_full_pickup_flow_with_qr_and_pin(client, actors, make_food):
     assert mine["status"] == "COLLECTED" and mine["pin"] is None and mine["qr_svg"] is None
 
 
+# QR içeriği ('FR:<token>') ile de doğrulama çalışır.
 def test_qr_payload_verification(client, actors, make_food, db):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -42,6 +46,7 @@ def test_qr_payload_verification(client, actors, make_food, db):
     assert client.post("/api/v1/reservations/verify", json={"code": f"FR:{token}"}, headers=donor).status_code == 200
 
 
+# Sahiplik: başka işletmenin geçerli PIN'i bile 404 verir (rezervasyon hiç görünmez).
 def test_other_donor_cannot_verify_someone_elses_reservation(client, actors, make_food):
     admin = actors.admin()
     _, owner = actors.donor(admin)
@@ -52,6 +57,7 @@ def test_other_donor_cannot_verify_someone_elses_reservation(client, actors, mak
     assert client.post("/api/v1/reservations/verify", json={"code": res["pin"]}, headers=owner).status_code == 200
 
 
+# Hız sınırı: 5 hatalı denemeden sonra doğru PIN de 429 alır.
 def test_pin_guessing_is_locked_out(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -64,6 +70,7 @@ def test_pin_guessing_is_locked_out(client, actors, make_food):
     assert client.post("/api/v1/reservations/verify", json={"code": res["pin"]}, headers=donor).status_code == 429
 
 
+# Rol-kategori eşleşmesi ve kişi başı porsiyon sınırı.
 def test_category_and_portion_rules(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -79,6 +86,7 @@ def test_category_and_portion_rules(client, actors, make_food):
     assert client.post("/api/v1/reservations", json={"food_id": human["id"]}, headers=donor).status_code == 403
 
 
+# Aynı anda en fazla 2 aktif rezervasyon; tükenmiş ilan 409 verir.
 def test_active_reservation_limit_and_sold_out(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -91,6 +99,7 @@ def test_active_reservation_limit_and_sold_out(client, actors, make_food):
     assert _reserve(client, b, foods[0]["id"]).status_code == 409  # already taken
 
 
+# İptalde porsiyonlar stoğa döner; yalnızca sahibi iptal eder; iptal edileni tekrar iptal etmek 409.
 def test_cancel_returns_portions_and_only_owner_may_cancel(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -104,6 +113,7 @@ def test_cancel_returns_portions_and_only_owner_may_cancel(client, actors, make_
     assert client.post(f"/api/v1/reservations/{res['id']}/cancel", headers=a).status_code == 409
 
 
+# Süre dolumu: teslim alınmayan rezervasyonun porsiyonları serbest kalır.
 def test_expired_reservation_releases_portions(app, client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -116,6 +126,8 @@ def test_expired_reservation_releases_portions(app, client, actors, make_food):
     assert client.get("/api/v1/reservations/mine", headers=student).json()[0]["status"] == "EXPIRED"
 
 
+# Olay zinciri: ilan kaldırılır -> reservation dinleyicisi iptal eder -> notification yararlanıcıya
+# haber verir. Üç modülün birlikte çalıştığını gösterir.
 def test_cancelling_food_cancels_pending_reservations(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)

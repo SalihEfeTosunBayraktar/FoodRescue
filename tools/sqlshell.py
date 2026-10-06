@@ -18,6 +18,8 @@ from pathlib import Path
 DEFAULT_DB = Path(__file__).resolve().parents[1] / "data" / "foodrescue.db"
 
 
+# sqlite3.complete_statement: noktalı virgülün metin içinde mi ifade sonunda mı olduğunu bilir;
+# kendimiz bölseydik 'a;b' gibi metinleri bozardık.
 def split_statements(sql: str) -> list[str]:
     """Split on ';' using sqlite3.complete_statement so semicolons inside strings do not break it."""
     statements, buffer = [], ""
@@ -31,6 +33,7 @@ def split_statements(sql: str) -> list[str]:
     return [s for s in statements if any(not l.strip().startswith("--") and l.strip() for l in s.splitlines())]
 
 
+# Sorgu sonucunu hizalı tablo olarak yazar: sütun genişlikleri en uzun değere göre hesaplanır.
 def render(cursor: sqlite3.Cursor) -> str:
     if cursor.description is None:
         return "(ok)"
@@ -44,6 +47,7 @@ def render(cursor: sqlite3.Cursor) -> str:
     return "\n".join(out)
 
 
+# Her ifadeyi sırayla çalıştırır ve sonucu basar.
 def run(connection: sqlite3.Connection, sql: str) -> None:
     for statement in split_statements(sql):
         first = next((l for l in statement.splitlines() if l.strip()), "")
@@ -64,7 +68,10 @@ def main() -> int:
         print(f"Veritabanı yok: {args.db}\nÖnce sunucuyu bir kez başlatın: python run.py", file=sys.stderr)
         return 1
     sql = Path(args.target).read_text(encoding="utf-8") if Path(args.target).exists() else args.target
+    # mode=ro: veritabanı salt okunur açılır; keşfederken veriyi yanlışlıkla bozamazsınız. --write
+    # verilirse rw.
     uri = f"file:{args.db.as_posix()}?mode={'rw' if args.write else 'ro'}"
+    # isolation_level=None: otomatik commit; BEGIN/ROLLBACK'i defterdeki komutlar kendisi yönetir.
     connection = sqlite3.connect(uri, uri=True, isolation_level=None)  # autocommit: BEGIN/ROLLBACK are explicit
     try:
         run(connection, sql)

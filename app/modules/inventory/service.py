@@ -24,12 +24,16 @@ from app.modules.identity.models import User, UserRole
 from app.modules.inventory.models import FoodCategory, FoodItem, FoodStatus
 from app.modules.inventory.schemas import FoodCreate, FoodOut, FoodUpdate
 
+# Dosya türü 'magic bytes' ile tanınır: her biçim belirli baytlarla başlar (JPEG: FF D8 FF, PNG: 89
+# 'PNG'). Uzantıya veya istemcinin söylediği Content-Type'a güvenilmez, çünkü ikisi de sahte
+# olabilir.
 _IMAGE_SIGNATURES = (
     (b"\xff\xd8\xff", ".jpg"),
     (b"\x89PNG\r\n\x1a\n", ".png"),
 )
 
 
+# Model -> yanıt şeması dönüşümü. donor_name gibi hesaplanmış alanlar burada eklenir.
 def to_out(food: FoodItem, distance_km: float | None = None) -> FoodOut:
     out = FoodOut.model_validate(
         {
@@ -43,16 +47,23 @@ def to_out(food: FoodItem, distance_km: float | None = None) -> FoodOut:
     return out
 
 
+# İlan açma iş akışı: hijyen beyanı -> zaman kuralları -> kayıt -> olay.
 def create_food(db: Session, donor: User, data: FoodCreate) -> FoodItem:
     settings = ctx_of(db).settings
+    # Beyan zorunlu. 422: istek biçimsel olarak geçerli ama iş kuralına uymuyor.
     if not data.hygiene_confirmed:
         raise AppError("food.hygiene_required", 422)
+    # Tüm zaman karşılaştırmaları UTC'de yapılır.
     now = utcnow()
+    # Geçmişe ilan açılamaz.
     if data.pickup_until <= now:
         raise AppError("food.pickup_in_past", 422)
+    # Üst sınır: 24 saatten uzun ilanlar sağlıksız gıda riski doğurur. Sınır
+    # settings.max_pickup_window_hours içindedir.
     if data.pickup_until > now + timedelta(hours=settings.max_pickup_window_hours):
         raise AppError("food.pickup_too_far", 422, hours=settings.max_pickup_window_hours)
 
+    # Başlangıçta kalan porsiyon = toplam porsiyon.
     food = FoodItem(
         donor_id=donor.id,
         title=data.title.strip(),
@@ -61,13 +72,17 @@ def create_food(db: Session, donor: User, data: FoodCreate) -> FoodItem:
         storage=data.storage,
         portions_total=data.portions_total,
         portions_left=data.portions_total,
+        # Kişi başı limit toplamdan büyük olamaz (10 porsiyonluk ilanda kişi başı 50 anlamsız).
         max_per_person=min(data.max_per_person, data.portions_total),
         pickup_until=data.pickup_until,
+        # `a or b`: a boşsa (None/boş metin) b kullanılır. Adres verilmezse bağışçının kayıtlı
+        # adresi.
         address=data.address or donor.address or "",
         latitude=data.latitude if data.latitude is not None else donor.latitude,
         longitude=data.longitude if data.longitude is not None else donor.longitude,
         hygiene_confirmed=True,
     )
+    # Oturuma ekle, flush ile id al, olayı yayınla, commit et: create_food'un standart dört adımı.
     db.add(food)
     db.flush()
     ctx_of(db).bus.publish(
@@ -77,6 +92,7 @@ def create_food(db: Session, donor: User, data: FoodCreate) -> FoodItem:
     return food
 
 
+# Tek ilan getirir; yoksa 404.
 def get_food(db: Session, food_id: int) -> FoodItem:
     food = db.get(FoodItem, food_id)
     if not food:
@@ -84,6 +100,7 @@ def get_food(db: Session, food_id: int) -> FoodItem:
     return food
 
 
+# Herkese açık liste. İş bölümü: süzme ve sıralama veritabanında (SQL), mesafe hesabı Python'da.
 def list_foods(
     db: Session,
     *,
@@ -94,7 +111,10 @@ def list_foods(
     radius_km: float | None = None,
     include_unavailable: bool = False,
 ) -> list[tuple[FoodItem, float | None]]:
+    # Önce en yakın zamanda bitecek ilanlar: aciliyet sırası.
     query = select(FoodItem).order_by(FoodItem.pickup_until.asc())
+    # Varsayılan olarak yalnızca şu an alınabilen ilanlar listelenir; üç koşul is_available ile
+    # aynıdır.
     if not include_unavailable:
         query = query.where(
             FoodItem.status == FoodStatus.AVAILABLE, FoodItem.portions_left > 0, FoodItem.pickup_until > utcnow()
@@ -102,25 +122,35 @@ def list_foods(
     if category:
         query = query.where(FoodItem.category == category)
     if q:
+        # LIKE kalıbı: % joker karakterdir. ilike büyük/küçük harf duyarsız arar. Değer parametre
+        # olarak bağlanır, SQL enjeksiyonu olmaz.
         like = f"%{q.strip()}%"
         query = query.where(FoodItem.title.ilike(like) | FoodItem.description.ilike(like))
 
+    # .unique(): joined eager load, aynı ilanı birden çok satırda getirebilir; tekilleştirir.
+    # list(): sorguyu şimdi çalıştır.
     foods = list(db.scalars(query).unique())
     if lat is None or lon is None:
         return [(food, None) for food in foods]
 
     # Distance is computed in Python (haversine). With PostgreSQL this becomes a PostGIS ST_DWithin query.
+    # Her ilan için mesafe hesaplanır (liste anlama / list comprehension). Sonuç (ilan, mesafe)
+    # çiftleridir.
     ranked = [(food, haversine_km(lat, lon, food.latitude, food.longitude)) for food in foods]
     if radius_km is not None:
         ranked = [(food, dist) for food, dist in ranked if dist <= radius_km]
+    # key=lambda: sıralama ölçütü çiftin ikinci elemanı (mesafe). En yakın en başta.
     return sorted(ranked, key=lambda pair: pair[1])
 
 
+# Bağışçının kendi ilanları (panel için), en yeniden eskiye.
 def donor_foods(db: Session, donor: User) -> list[FoodItem]:
     query = select(FoodItem).where(FoodItem.donor_id == donor.id).order_by(FoodItem.created_at.desc())
     return list(db.scalars(query).unique())
 
 
+# Sahiplik kontrolü tek yerde: ilan sahibi ya da yönetici. Düzenle/iptal/fotoğraf hep bunu kullanır.
+# Başında alt çizgi: modül içi yardımcı.
 def _owned_food(db: Session, actor: User, food_id: int) -> FoodItem:
     food = get_food(db, food_id)
     if food.donor_id != actor.id and actor.role != UserRole.ADMIN:
@@ -128,6 +158,7 @@ def _owned_food(db: Session, actor: User, food_id: int) -> FoodItem:
     return food
 
 
+# Kısmi güncelleme: yalnızca gönderilen (None olmayan) alanlar değişir.
 def update_food(db: Session, donor: User, food_id: int, data: FoodUpdate) -> FoodItem:
     food = _owned_food(db, donor, food_id)
     if food.status != FoodStatus.AVAILABLE:
@@ -148,6 +179,7 @@ def update_food(db: Session, donor: User, food_id: int, data: FoodUpdate) -> Foo
     return food
 
 
+# İlanı kaldırma. Olay yayınlanır; bekleyen rezervasyonları reservation modülü kendisi iptal eder.
 def cancel_food(db: Session, actor: User, food_id: int) -> FoodItem:
     food = _owned_food(db, actor, food_id)
     if food.status != FoodStatus.AVAILABLE:
@@ -157,6 +189,8 @@ def cancel_food(db: Session, actor: User, food_id: int) -> FoodItem:
     return food
 
 
+# Bağışçı askıya alınınca tüm müsait ilanları kaldırır. Olay dinleyicisinden çağrıldığı için commit
+# ETMEZ.
 def cancel_all_for_donor(db: Session, donor_id: int, actor_id: int | None) -> int:
     """Called when a donor is suspended. Does not commit (runs inside the publisher's transaction)."""
     foods = db.scalars(
@@ -169,6 +203,7 @@ def cancel_all_for_donor(db: Session, donor_id: int, actor_id: int | None) -> in
     return count
 
 
+# Tek ilanı iptal edip olayı yayınlar (iki yerden çağrıldığı için ayrıştırıldı).
 def _cancel(db: Session, food: FoodItem, actor_id: int | None) -> None:
     food.status = FoodStatus.CANCELLED
     ctx_of(db).bus.publish(
@@ -176,20 +211,25 @@ def _cancel(db: Session, food: FoodItem, actor_id: int | None) -> None:
     )
 
 
+# Güvenli dosya yükleme: sahiplik -> boyut -> tür -> rastgele ad -> kaydet.
 def save_photo(db: Session, donor: User, food_id: int, upload: UploadFile) -> FoodItem:
     settings = ctx_of(db).settings
     food = _owned_food(db, donor, food_id)
+    # Sınır + 1 bayt okuruz: sınırı aşan dosyayı tamamını belleğe almadan tespit ederiz.
     content = upload.file.read(settings.max_upload_bytes + 1)
     if len(content) > settings.max_upload_bytes:
         raise AppError("food.image_too_large", 413, mb=settings.max_upload_bytes // (1024 * 1024))
 
     # Never trust the client's file name or Content-Type: sniff the magic bytes instead.
+    # next(... , None): ilk eşleşen imzanın uzantısını bulur, yoksa None.
     extension = next((ext for sig, ext in _IMAGE_SIGNATURES if content.startswith(sig)), None)
     if extension is None and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
         extension = ".webp"
     if extension is None:
         raise AppError("food.bad_image", 415)
 
+    # Dosya adı sunucuda uuid ile üretilir: istemcinin adı kullanılmaz (yol atlatma `../../`
+    # saldırısını ve ad çakışmasını önler).
     relative = Path("foods") / f"{uuid.uuid4().hex}{extension}"
     target = settings.upload_dir / relative
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -199,9 +239,14 @@ def save_photo(db: Session, donor: User, food_id: int, upload: UploadFile) -> Fo
     return food
 
 
+# ATOMİK stok düşümü. 'Oku, kontrol et, yaz' yaklaşımında iki istek aynı anda son porsiyonu okuyup
+# ikisi de alabilirdi (yarış durumu / race condition). Koşulu UPDATE'in WHERE kısmına koyunca
+# veritabanı kontrol ve düşümü TEK adımda, kilitli yapar.
 def take_portions(db: Session, food_id: int, count: int, now: datetime | None = None) -> FoodItem:
     """Atomically reserve `count` portions or raise. Does not commit."""
     now = now or utcnow()
+    # Ham UPDATE: porsiyon yeterliyse düşer. synchronize_session=False: bellekteki nesneyi elle
+    # yenileyeceğiz.
     result = db.execute(
         update(FoodItem)
         .where(
@@ -213,21 +258,29 @@ def take_portions(db: Session, food_id: int, count: int, now: datetime | None = 
         .values(portions_left=FoodItem.portions_left - count)
         .execution_options(synchronize_session=False)
     )
+    # rowcount = etkilenen satır sayısı. 0 ise koşullar sağlanmadı: ilan yok, kapalı, süresi dolmuş
+    # ya da porsiyon yetersiz.
     if result.rowcount != 1:
         if db.get(FoodItem, food_id) is None:
             raise AppError("food.not_found", 404)
         raise AppError("food.unavailable", 409)
     food = get_food(db, food_id)
+    # UPDATE doğrudan SQL ile yapıldığı için bellekteki nesne eski değeri tutar; yalnızca değişen
+    # kolonu veritabanından yeniden okuruz.
     db.refresh(food, attribute_names=["portions_left"])  # the raw UPDATE bypassed the identity map
     return food
 
 
+# İptal/süre dolumunda porsiyonları iade eder; toplamı asla aşmaz.
 def return_portions(db: Session, food_id: int, count: int) -> None:
     """Give portions back (cancelled or expired reservation). Never exceeds portions_total. Does not commit."""
     db.execute(
         update(FoodItem)
         .where(FoodItem.id == food_id)
         .values(
+            # SQL CASE ifadesi: `eklenince toplamı aşarsa toplam, aksi halde eklenmiş değer`.
+            # LEAST/MIN fonksiyonu veritabanları arasında farklı olduğu için taşınabilir CASE
+            # seçildi.
             portions_left=case(
                 (FoodItem.portions_left + count > FoodItem.portions_total, FoodItem.portions_total),
                 else_=FoodItem.portions_left + count,
@@ -237,6 +290,8 @@ def return_portions(db: Session, food_id: int, count: int) -> None:
     )
 
 
+# Zamanlı iş: son teslim saati geçen ilanları EXPIRED yapar. `now` parametre olduğu için testte
+# geleceğin saatini vererek beklemeden denenir.
 def expire_due(db: Session, now: datetime) -> int:
     foods = list(
         db.scalars(select(FoodItem).where(FoodItem.status == FoodStatus.AVAILABLE, FoodItem.pickup_until <= now)).unique()
@@ -250,5 +305,6 @@ def expire_due(db: Session, now: datetime) -> int:
     return len(foods)
 
 
+# Hangi rol hangi kategoriyi alabilir? Yararlanıcı insan yemeği, barınak hayvan yemi.
 def category_for_role(role: UserRole) -> FoodCategory | None:
     return {UserRole.BENEFICIARY: FoodCategory.HUMAN, UserRole.SHELTER: FoodCategory.ANIMAL}.get(role)

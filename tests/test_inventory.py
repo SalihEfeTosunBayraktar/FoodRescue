@@ -6,6 +6,7 @@ from app.modules.inventory import service as inventory
 from tests.conftest import food_payload
 
 
+# İş kuralı: hijyen beyanı olmadan ilan açılamaz.
 def test_hygiene_confirmation_is_mandatory(client, actors):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -13,6 +14,7 @@ def test_hygiene_confirmation_is_mandatory(client, actors):
     assert res.status_code == 422
 
 
+# Zaman kuralları: geçmiş ve 24 saatten uzak tarihler reddedilir.
 def test_pickup_time_must_be_future_and_within_limit(client, actors):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -21,6 +23,7 @@ def test_pickup_time_must_be_future_and_within_limit(client, actors):
     assert past.status_code == 422 and far.status_code == 422
 
 
+# Liste herkese açık; kategori ve arama süzgeçleri çalışır.
 def test_public_listing_needs_no_login_and_filters_by_category(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -32,6 +35,7 @@ def test_public_listing_needs_no_login_and_filters_by_category(client, actors, m
     assert client.get("/api/v1/foods", params={"q": "Insan"}).json()[0]["title"] == "Insan yemegi"
 
 
+# Haversine ile sıralama ve yarıçap süzgeci. Sivas içinde yakın ve uzak iki işletme kullanılır.
 def test_listing_sorts_by_distance_and_applies_radius(client, actors, make_food):
     admin = actors.admin()
     _, near = actors.donor(admin, lat=39.750, lon=37.015)
@@ -45,6 +49,7 @@ def test_listing_sorts_by_distance_and_applies_radius(client, actors, make_food)
     assert [f["title"] for f in within] == ["Yakin"]
 
 
+# Sahiplik: başkasının ilanı düzenlenemez ve kaldırılamaz.
 def test_only_owner_can_edit_or_cancel(client, actors, make_food):
     admin = actors.admin()
     _, owner = actors.donor(admin)
@@ -57,6 +62,8 @@ def test_only_owner_can_edit_or_cancel(client, actors, make_food):
     assert client.get("/api/v1/foods").json() == []
 
 
+# Güvenlik: uzantısı .png olan ama içeriği betik olan dosya reddedilir; uzantısı .txt olan ama
+# içeriği PNG olan kabul edilir. Yani karar içeriğe göredir.
 def test_photo_upload_checks_content_not_filename(client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)
@@ -70,6 +77,9 @@ def test_photo_upload_checks_content_not_filename(client, actors, make_food):
     assert client.get(ok.json()["photo_url"]).status_code == 200
 
 
+# EŞZAMANLILIK: 5 porsiyon için 12 thread aynı anda 1'er porsiyon almaya çalışır; tam 5'i başarılı
+# olmalı. Atomik UPDATE yoksa bu test rastgele başarısız olurdu. Gerçek dosya veritabanı kullanılır,
+# çünkü bellek içi veritabanı tek bağlantıyı paylaşır ve yarışı gerçekçi sınamaz.
 def test_take_portions_is_atomic_under_concurrency(tmp_path):
     """Uses a real SQLite file: each thread gets its own connection, like the running server."""
     from dataclasses import replace
@@ -113,6 +123,8 @@ def test_take_portions_is_atomic_under_concurrency(tmp_path):
     app.state.db.engine.dispose()
 
 
+# Zamanlı iş: gelecekteki bir saat verip süresi dolmuş durumu BEKLEMEDEN sınarız (zamanı parametre
+# yapmanın faydası).
 def test_expiry_job_marks_overdue_food(app, client, actors, make_food):
     admin = actors.admin()
     _, donor = actors.donor(admin)

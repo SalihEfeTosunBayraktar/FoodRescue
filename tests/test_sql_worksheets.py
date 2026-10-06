@@ -13,14 +13,17 @@ import pytest
 from app.seed import seed_demo
 
 ROOT = Path(__file__).resolve().parents[1]
+# Her modülün sql/ klasöründeki çalışma defterleri bulunur.
 WORKSHEETS = sorted(ROOT.glob("app/modules/*/sql/*.sql"))
 
+# tools/sqlshell.py paket olmadığından dosya yolundan yüklenir; bölme mantığı testle paylaşılır.
 _spec = importlib.util.spec_from_file_location("sqlshell", ROOT / "tools" / "sqlshell.py")
 sqlshell = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sqlshell)
 
 
 @pytest.fixture()
+# Tohum verili gerçek bir SQLite dosyası kurar ve ham sqlite3 bağlantısı verir (ORM'siz).
 def seeded_connection(tmp_path):
     from dataclasses import replace
 
@@ -43,12 +46,16 @@ def seeded_connection(tmp_path):
     connection.close()
 
 
+# Yeni modül eklenip SQL defteri unutulmasın.
 def test_every_module_has_a_worksheet():
     modules = {p.parent.parent.name for p in WORKSHEETS}
     assert modules == {"identity", "inventory", "reservation", "notification", "impact"}
 
 
 @pytest.mark.parametrize("path", WORKSHEETS, ids=lambda p: p.parent.parent.name)
+# Her defterdeki HER sorgu çalışmalı: tablo veya kolon yeniden adlandırılıp defter unutulursa bu
+# test hangi sorgunun bozulduğunu söyler. Ayrıca veri değişmemeli (ROLLBACK'lerin işe yaradığının
+# kanıtı).
 def test_worksheet_runs_and_leaves_data_unchanged(path, seeded_connection):
     before = seeded_connection.execute("SELECT (SELECT COUNT(*) FROM users), (SELECT SUM(portions_left) FROM food_items), "
                                        "(SELECT COUNT(*) FROM notifications WHERE read_at IS NULL)").fetchone()

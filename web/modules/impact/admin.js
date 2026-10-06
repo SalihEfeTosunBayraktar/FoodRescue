@@ -6,15 +6,21 @@ import { formatDateTime } from '../../core/format.js';
 import { badge, button, emptyState, field, formDialog, tabs, toast, withBusy } from '../../core/ui.js';
 import identity from '../identity/index.js';
 
+// Yönetici sekmeleri; adres #/admin/<sekme> biçimindedir, yani geri düğmesi ve yer imi çalışır.
 const TABS = ['overview', 'accounts', 'complaints', 'audit'];
+// Şikâyet durumu -> etiket rengi.
 const COMPLAINT_TONE = { OPEN: 'warn', RESOLVED: 'ok', DISMISSED: 'neutral' };
 
+// Sayı kartı.
 function tile(label, value, iconName) {
   return h('div', { class: 'stat' }, icon(iconName, { size: 22 }), h('div', { class: 'stat-value' }, String(value)), h('div', { class: 'stat-label' }, label));
 }
 
+// Genel bakış: iki kaynaktan gelen sayaçlar.
 async function overviewTab() {
+  // İki bağımsız istek paralel çalışır.
   const [overview, summary] = await Promise.all([api('/admin/overview'), api('/impact/summary')]);
+  // Sözlüğü (rol -> adet) listeye çeviren küçük bileşen; etiket çevirisi strings.js'ten.
   const breakdown = (title, data, labelKey) => h('div', { class: 'card' }, h('h3', {}, title),
     h('ul', { class: 'plain' }, Object.entries(data).map(([key, n]) => h('li', { class: 'row-between' }, h('span', {}, t(`${labelKey}.${key}`)), h('strong', {}, String(n))))));
   return h('div', { class: 'stack' },
@@ -28,14 +34,17 @@ async function overviewTab() {
       breakdown(t('admin.overview.reservations'), overview.reservations_by_status, 'reservation.status')));
 }
 
+// Şikâyet listesi ve karar verme.
 async function complaintsTab() {
   const root = h('div', { class: 'stack' });
 
+  // Şikâyetleri çeker ve ekranı çizer.
   async function load() {
     const items = await api('/admin/complaints');
     root.replaceChildren(...(items.length ? items.map(card) : [emptyState(t('admin.complaints.empty'), 'flag')]));
   }
 
+  // Bir şikâyet kartı: yalnızca AÇIK şikâyette karar düğmeleri görünür.
   function card(item) {
     return h('article', { class: 'card' },
       h('div', { class: 'card-head' },
@@ -48,6 +57,7 @@ async function complaintsTab() {
         button(t('admin.complaints.dismiss'), { variant: 'ghost', iconName: 'x', onClick: () => resolve(item, 'DISMISS') })) : null);
   }
 
+  // Haklı bul / reddet: ortak not penceresi.
   function resolve(item, action) {
     const note = h('textarea', { rows: 3, maxlength: 500 });
     const submit = button(t('common.confirm'), { type: 'submit' });
@@ -67,6 +77,7 @@ async function complaintsTab() {
   return root;
 }
 
+// Denetim kaydı tablosu: son 100 olay.
 async function auditTab() {
   const rows = await api('/admin/audit', { query: { limit: 100 } });
   if (!rows.length) return emptyState(t('admin.audit.empty'), 'log');
@@ -80,9 +91,13 @@ async function auditTab() {
       h('td', { class: 'muted small' }, row.detail ?? ''))))));
 }
 
+// Sekmeli yönetim sayfası.
 export async function adminPage({ params }) {
+  // Geçersiz sekme adı gelirse 'overview'a düşer (kullanıcı adresi elle bozmuş olabilir).
   const active = TABS.includes(params.tab) ? params.tab : 'overview';
+  // Sekme adı -> o sekmeyi üreten fonksiyon (if/else zinciri yerine arama tablosu).
   const renderers = { overview: overviewTab, accounts: async () => identity.components.accountsPanel(), complaints: complaintsTab, audit: auditTab };
+  // Yalnızca seçili sekmenin verisi çekilir (tembel yükleme).
   const content = await renderers[active]();
   return h('section', {},
     h('h1', {}, t('admin.title')),

@@ -37,3 +37,4 @@ Her kişi **bir modülün hem sunucu hem arayüz tarafının** sahibidir (ör. K
 - İsimler iş dilinden gelir (`take_portions`, `verify_pickup`), `process_data` gibi genel isimlerden kaçının.
 - `try/except` ile sessizce hata yutmayın; beklenen iş hataları `AppError` ile, anahtarla (`messages.py`) fırlatılır.
 - Sihirli sayı yok: eşikler `settings.py` içindedir.
+- Yorumlar Türkçe ve öğreticidir: 'ne yapıyor' değil 'NEDEN böyle' yazın (örn. bir kontrolün hangi saldırıyı veya hatayı önlediği). Kodu tekrar eden yorum yazmayın.

@@ -10,6 +10,9 @@ from app.core.mailer import LogMailer, Mailer
 from app.core.ratelimit import FailureLimiter
 
 
+# Uygulama genelinde paylaşılan nesneler (ayarlar, olay yolu, sınırlayıcılar, posta). Global
+# değişken yerine bu paket kullanılır; her test kendi bağlamını kurduğu için testler birbirini
+# etkilemez.
 @dataclass
 class AppContext:
     """Per-application collaborators. Reachable from any Session via ctx_of(db)."""
@@ -21,6 +24,7 @@ class AppContext:
     mailer: Mailer
 
 
+# Bağlamı ayarlardan kurar. Üretimde LogMailer yerine SMTP sınıfı burada bağlanır.
 def build_context(settings: Settings) -> AppContext:
     return AppContext(
         settings=settings,
@@ -31,5 +35,7 @@ def build_context(settings: Settings) -> AppContext:
     )
 
 
+# Session nesnesine eklenmiş bilgiden bağlama ulaşır (Database.session() ekler). Servis
+# fonksiyonları böylece HTTP isteğini bilmeden ayarlara erişir.
 def ctx_of(db: Session) -> AppContext:
     return db.info["ctx"]

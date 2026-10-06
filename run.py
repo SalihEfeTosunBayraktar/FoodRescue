@@ -16,7 +16,10 @@ from app.main import create_app
 from app.seed import DEMO_ACCOUNTS, DEMO_PASSWORD, seed_demo
 
 
+# Yerel test sunucusunun başlatıcısı: ayarları kurar, gerekirse demo veriyi yükler ve uvicorn'u
+# çalıştırır.
 def main() -> None:
+    # argparse: komut satırı seçeneklerini (--port, --reset ...) tanımlar ve doğrular.
     parser = argparse.ArgumentParser(description="FoodRescue local test server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -25,14 +28,20 @@ def main() -> None:
     parser.add_argument("--admin-password", help="private admin password (use when the server is shared publicly)")
     args = parser.parse_args()
 
+    # Log biçimi: zaman, seviye, kaynak. Sunucu çıktısı sorun ararken ilk bakılacak yerdir.
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Ayarlar tek bir yerden yüklenir.
     settings = load_settings()
+    # --reset yalnızca BİLİNEN veritabanı dosyalarını siler, daha geniş bir klasörü değil. Silme
+    # komutlarında hedefi dar tutmak iyi bir alışkanlıktır.
     if args.reset:
         # Only the known database file, never a wider folder.
         for suffix in ("", "-wal", "-shm"):
             (DATA_DIR / f"foodrescue.db{suffix}").unlink(missing_ok=True)
 
+    # Uygulamayı kur (tablolar bu sırada oluşur).
     app = create_app(settings)
+    # Boş veritabanına demo veri yükle.
     if not args.no_seed:
         with app.state.db.session() as session:
             if seed_demo(session, admin_password=args.admin_password):
@@ -44,6 +53,7 @@ def main() -> None:
     for role, email in DEMO_ACCOUNTS.items():
         print(f"  {role:<14} {email}")
     print()
+    # Sunucuyu başlatır; Ctrl+C ile durdurulur.
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

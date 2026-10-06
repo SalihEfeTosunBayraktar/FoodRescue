@@ -4,8 +4,11 @@ import { t } from './i18n.js';
 
 // Leaflet is loaded on demand from a CDN. If it cannot be loaded (offline), callers get a clear
 // fallback message and the rest of the page keeps working.
+// Leaflet kütüphanesi bir kez yüklenir; yüklenirken gelen diğer çağrılar aynı sözü (Promise)
+// paylaşır.
 let leafletPromise = null;
 
+// <script> eklemeyi Promise'e çevirir: yüklenince resolve, hata olunca reject.
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
@@ -17,6 +20,7 @@ function loadScript(src) {
   });
 }
 
+// Haritayı İHTİYAÇ OLUNCA yükleriz (tembel yükleme): harita olmayan sayfalar bu indirmeyi yapmaz.
 export function loadLeaflet() {
   if (!leafletPromise) {
     leafletPromise = (async () => {
@@ -27,6 +31,7 @@ export function loadLeaflet() {
       await loadScript(CONFIG.cdn.leafletJs);
       return window.L;
     })().catch((error) => {
+      // Yükleme başarısızsa (internet yok) bir sonraki denemede yeniden denensin.
       leafletPromise = null; // allow a retry later
       throw error;
     });
@@ -34,6 +39,8 @@ export function loadLeaflet() {
   return leafletPromise;
 }
 
+// Leaflet'in varsayılan işaretçi görselleri yerine kendi SVG işaretçimiz: ek dosya yok, kategoriye
+// göre renk.
 function pinIcon(L, color) {
   const html =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32" width="30" height="40">` +
@@ -55,30 +62,41 @@ function whenConnected(el, frames = 120) {
   });
 }
 
+// Harita yüklenemezse kullanıcıya mesaj; liste kullanılmaya devam eder (zarif bozulma / graceful
+// degradation).
 export function mapUnavailable() {
   return h('div', { class: 'notice notice-info' }, t('map.unavailable'));
 }
 
 // Returns { update(foods), focus(id), destroy() }. `onSelect(food)` fires on marker click.
+// İlanları harita üzerinde gösterir. Döndürdüğü nesne update/focus/destroy yöntemlerini sunar.
 export async function createFoodMap(container, { center = CONFIG.defaultCenter, onSelect } = {}) {
+  // Kütüphane hazır olana kadar bekle.
   const L = await loadLeaflet();
   await whenConnected(container);
+  // Haritayı kapsayıcıya kur ve başlangıç merkezini ata.
   const map = L.map(container, { zoomControl: true }).setView(center, CONFIG.defaultZoom);
   L.tileLayer(CONFIG.tileUrl, { maxZoom: 19, attribution: CONFIG.tileAttribution }).addTo(map);
+  // Tüm işaretçiler tek katmanda toplanır; yenilerken katmanı bir hamlede temizleriz.
   const layer = L.layerGroup().addTo(map);
+  // İlan numarası -> işaretçi: karta gelinince ilgili işaretçiyi bulmak için.
   const markers = new Map();
   let alive = true;
   setTimeout(() => { if (alive) map.invalidateSize(); }, 0);
 
   return {
+    // İşaretçileri yeniden çizer. fit=true ise harita tüm ilanları kapsayacak şekilde yakınlaşır.
     update(foods, { fit = true } = {}) {
       if (!alive) return;
       layer.clearLayers();
       markers.clear();
+      // Her ilan için bir işaretçi.
       foods.forEach((food) => {
         const marker = L.marker([food.latitude, food.longitude], { icon: pinIcon(L, CONFIG.categoryColors[food.category]) });
         const popup = h('div', { class: 'map-popup' }, h('strong', {}, food.title), h('div', {}, food.donor_name));
+        // Popup'a DOM elemanı verilir (metin değil): ilan adı HTML olarak yorumlanmaz, XSS güvenli.
         marker.bindPopup(popup);
+        // İşaretçiye tıklanınca sayfaya haber ver (karta kaydır).
         marker.on('click', () => onSelect?.(food));
         marker.addTo(layer);
         markers.set(food.id, marker);
@@ -87,15 +105,18 @@ export async function createFoodMap(container, { center = CONFIG.defaultCenter, 
         map.fitBounds(L.latLngBounds(foods.map((f) => [f.latitude, f.longitude])).pad(0.25), { maxZoom: 15, animate: false });
       }
     },
+    // Karta fare ile gelinince haritada o işaretçiyi göster.
     focus(id) {
       const marker = markers.get(id);
       if (alive && marker) { map.setView(marker.getLatLng(), 15, { animate: false }); marker.openPopup(); }
     },
+    // Sayfadan çıkarken haritayı yok et ve zamanlayıcıları etkisiz kıl.
     destroy() { alive = false; map.remove(); },
   };
 }
 
 // Click-to-place location picker used by donor registration.
+// Kayıt formunda işletme konumunu haritaya tıklayarak seçtiren bileşen.
 export async function createLocationPicker(container, { initial, onChange }) {
   const L = await loadLeaflet();
   await whenConnected(container);
@@ -103,11 +124,13 @@ export async function createLocationPicker(container, { initial, onChange }) {
   const map = L.map(container).setView(start, CONFIG.defaultZoom);
   L.tileLayer(CONFIG.tileUrl, { maxZoom: 19, attribution: CONFIG.tileAttribution }).addTo(map);
   let marker = null;
+  // İşaretçi varsa taşı, yoksa oluştur.
   const place = (lat, lon) => {
     if (marker) marker.setLatLng([lat, lon]);
     else marker = L.marker([lat, lon], { icon: pinIcon(L, CONFIG.categoryColors.HUMAN) }).addTo(map);
     onChange({ lat, lon });
   };
+  // Haritaya tıklayınca işaretçiyi oraya koy ve koordinatı forma bildir.
   map.on('click', (event) => place(event.latlng.lat, event.latlng.lng));
   let alive = true;
   setTimeout(() => { if (alive) map.invalidateSize(); }, 0);
@@ -117,6 +140,8 @@ export async function createLocationPicker(container, { initial, onChange }) {
   };
 }
 
+// Tarayıcının konum izni: kullanıcı reddederse hata mesajıyla reject edilir. Kullanıcı izni olmadan
+// konum alınamaz.
 export function currentPosition() {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) return reject(new Error(t('map.noGeolocation')));

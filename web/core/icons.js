@@ -37,8 +37,13 @@ const PATHS = {
   map: '<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/>',
 };
 
+// Aynı ikon seti her yerde kullanılır: tutarlı görünüm, emoji yok. `currentColor` ikonun rengini
+// çevresindeki metinden alır.
 export function icon(name, { size = 20, className = '' } = {}) {
+  // İsim bulunamazsa uyarı ikonu: yazım hatası sayfayı bozmaz.
   const inner = PATHS[name] ?? PATHS.alert;
+  // Şablon metni (template literal) ile SVG kurulur; değişkenler yalnızca sayısal boyut ve sabit
+  // yoldur.
   const svg = svgFromString(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" ` +
       `stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`,
@@ -47,6 +52,7 @@ export function icon(name, { size = 20, className = '' } = {}) {
   return svg;
 }
 
+// Harita işaretçileri gibi DOM yerine METİN gereken yerler için.
 export function iconMarkup(name, size = 18) {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" ` +

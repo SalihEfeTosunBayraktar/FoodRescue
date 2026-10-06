@@ -95,3 +95,4 @@ docs/            ARCHITECTURE.md, EKIP.md, ogrenme/
 3. Arayüzde `innerHTML` kullanılmaz (XSS'e karşı). Elemanlar `h()` ile kurulur.
 4. Her iş kuralı değişikliği önce başarısız bir test, sonra çözüm ile yapılır.
 5. Emoji yok; ikonlar SVG'dir.
+6. **Kod yorumları Türkçe ve öğreticidir** (ne yaptığını değil NEDEN öyle yapıldığını anlatır). Bu, genel kodlama alışkanlığındaki 'yorumlar İngilizce' kuralından bilerek ayrılır, çünkü proje öğrenciler için yazılmıştır. Davranışı değiştirmeden yorum eklemek/güncellemek güvenlidir; yeni kod yazarken aynı yoğunlukta 'neden' yorumu bırakın.

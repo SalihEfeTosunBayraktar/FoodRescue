@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.modules.impact.models import ComplaintStatus
 
 
+# Ana sayfadaki herkese açık sayaçlar. Kişisel veri içermez.
 class SummaryOut(BaseModel):
     portions_rescued: int
     pickups_completed: int
@@ -15,6 +16,7 @@ class SummaryOut(BaseModel):
     foods_available: int
 
 
+# İşletmenin kendi panosu: teslim edilen ve bekleyen porsiyonlar.
 class DonorImpactOut(BaseModel):
     portions_rescued: int
     pickups_completed: int
@@ -22,11 +24,14 @@ class DonorImpactOut(BaseModel):
     foods_published: int
 
 
+# Şikâyet girdisi: hangi teslim ve ne oldu.
 class ComplaintIn(BaseModel):
     reservation_id: int
+    # En az 10 karakter: tek kelimelik anlamsız şikâyetleri ayıklar.
     reason: str = Field(min_length=10, max_length=1000)
 
 
+# Yönetici için şikâyet yanıtı.
 class ComplaintOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,11 +45,13 @@ class ComplaintOut(BaseModel):
     created_at: datetime
 
 
+# Yönetici kararı: haklı bul (RESOLVE) veya reddet (DISMISS), isteğe bağlı notla.
 class ResolveIn(BaseModel):
     action: Literal["RESOLVE", "DISMISS"]
     note: str | None = Field(default=None, max_length=500)
 
 
+# Denetim satırı yanıtı.
 class AuditOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -57,6 +64,7 @@ class AuditOut(BaseModel):
     created_at: datetime
 
 
+# Yönetici panosundaki sayaçlar ve dağılımlar (sözlük: rol -> adet).
 class OverviewOut(BaseModel):
     pending_accounts: int
     open_complaints: int

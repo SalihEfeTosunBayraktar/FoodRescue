@@ -10,38 +10,48 @@ from app.core.events import EventBus
 from app.modules.notification.service import notify
 
 
+# Kime ne söyleneceğinin TEK karar yeri bu dosyadır. Başvuru sonucu başvurana bildirilir.
 def _on_account_reviewed(db: Session, _e: str, p: dict[str, Any]) -> None:
     kind = "account.approved" if p["approved"] else "account.rejected"
     notify(db, p["user_id"], kind, note=p["note"])
 
 
+# Askıya alınan kullanıcıya gerekçeyle bildirim.
 def _on_account_suspended(db: Session, _e: str, p: dict[str, Any]) -> None:
     notify(db, p["user_id"], "account.suspended", reason=p["reason"])
 
 
+# Yeni rezervasyon BAĞIŞÇIYA bildirilir.
 def _on_reservation_created(db: Session, _e: str, p: dict[str, Any]) -> None:
     notify(db, p["donor_id"], "reservation.created.donor", **_fields(p))
 
 
+# Teslim tamamlanınca YARARLANICIYA teşekkür bildirimi.
 def _on_reservation_collected(db: Session, _e: str, p: dict[str, Any]) -> None:
     notify(db, p["beneficiary_id"], "reservation.collected.beneficiary", **_fields(p))
 
 
+# Süresi dolan rezervasyon YARARLANICIYA bildirilir.
 def _on_reservation_expired(db: Session, _e: str, p: dict[str, Any]) -> None:
     notify(db, p["beneficiary_id"], "reservation.expired.beneficiary", **_fields(p))
 
 
+# İptalin kaynağına göre karşı taraf bilgilendirilir.
 def _on_reservation_cancelled(db: Session, _e: str, p: dict[str, Any]) -> None:
+    # İlan kaldırıldıysa yararlanıcıya, yararlanıcı iptal ettiyse bağışçıya haber verilir.
     if p.get("reason") == "food_cancelled":
         notify(db, p["beneficiary_id"], "reservation.cancelled.beneficiary", **_fields(p))
     else:
         notify(db, p["donor_id"], "reservation.cancelled.donor", **_fields(p))
 
 
+# Şablonların ihtiyaç duyduğu alanları olay yükünden seçer.
 def _fields(p: dict[str, Any]) -> dict[str, Any]:
     return {"food_title": p["food_title"], "portions": p["portions"], "beneficiary": p["beneficiary"]}
 
 
+# Olay adı -> işleyici eşlemesi. Yeni bildirim eklemek için yalnızca buraya satır, messages.py'ye
+# şablon eklenir.
 def subscribe(bus: EventBus) -> None:
     bus.subscribe(events.ACCOUNT_REVIEWED, _on_account_reviewed)
     bus.subscribe(events.ACCOUNT_SUSPENDED, _on_account_suspended)

@@ -40,6 +40,7 @@ DEMO_ACCOUNTS = [
 ]
 
 
+# cloudflared programını bulur; yoksa kurulum adresini söyleyip çıkar.
 def find_cloudflared() -> str:
     if CLOUDFLARED_DEFAULT.exists():
         return str(CLOUDFLARED_DEFAULT)
@@ -49,6 +50,8 @@ def find_cloudflared() -> str:
     return found
 
 
+# Sunucu hazır olana kadar sağlık adresini yoklar (polling); hazır olmadan tünel açmak boş link
+# verirdi.
 def wait_for_health(port: int, timeout: float = 40) -> None:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -60,10 +63,14 @@ def wait_for_health(port: int, timeout: float = 40) -> None:
     raise RuntimeError("sunucu zamanında başlamadı")
 
 
+# cloudflared adresi hata çıktısına (stderr) yazar; satırları okuyup trycloudflare adresini düzenli
+# ifadeyle yakalar.
 def read_tunnel_url(process: subprocess.Popen, timeout: float = 60) -> str:
     found: list[str] = []
     ready = threading.Event()
 
+    # Adres bulunduktan SONRA da çıktıyı okumaya devam eder: okunmayan boru (pipe) dolarsa süreç
+    # donar.
     def pump() -> None:  # keeps draining output so cloudflared never blocks on a full pipe
         for line in process.stderr:
             match = URL_PATTERN.search(line)
@@ -84,19 +91,24 @@ def main() -> int:
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
 
+    # Her oturumda rastgele yönetici parolası: bilinen demo parolasıyla internete açık yönetici
+    # paneli bırakmayız.
     admin_password = secrets.token_urlsafe(12)
     server_cmd = [sys.executable, str(ROOT / "run.py"), "--port", str(args.port), "--admin-password", admin_password]
     if not args.keep_data:
         server_cmd.append("--reset")
 
+    # Sunucuyu ayrı süreç olarak başlatır.
     server = subprocess.Popen(server_cmd, cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     tunnel = None
     try:
         wait_for_health(args.port)
+        # Tüneli ayrı süreç olarak başlatır; yerel sunucuya yönlendirir.
         tunnel = subprocess.Popen(
             [find_cloudflared(), "tunnel", "--no-autoupdate", "--url", f"http://127.0.0.1:{args.port}"],
             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
         )
+        # Tünel adresi hazır olunca devam.
         url = read_tunnel_url(tunnel)
 
         lines = [
@@ -117,6 +129,7 @@ def main() -> int:
         INFO_FILE.write_text(text + "\n", encoding="utf-8")
         print("\n" + text + f"\n\n(Bilgiler ayrıca kaydedildi: {INFO_FILE})\n", flush=True)
 
+        # poll(): süreç hâlâ çalışıyorsa None döner; ikisi de yaşadığı sürece bekleriz.
         while server.poll() is None and tunnel.poll() is None:
             time.sleep(1)
         print("Süreçlerden biri kapandı, paylaşım sonlandırılıyor.")
@@ -124,10 +137,12 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\nKapatılıyor...")
         return 0
+    # Ctrl+C ya da hata olsa da iki süreç de kapatılır; geride açık bir tünel kalmaz.
     finally:
         for process in (tunnel, server):
             if process and process.poll() is None:
                 process.terminate()
+        # Yönetici parolasını içeren dosya paylaşım bitince silinir.
         INFO_FILE.unlink(missing_ok=True)  # the saved admin password is only valid while sharing
 
 
