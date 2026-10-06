@@ -1,0 +1,11 @@
+{
+  "name": "FoodRescue",
+  "short_name": "FoodRescue",
+  "description": "Arta kalan gıdayı ihtiyaç sahiplerine ve barınaklara ulaştıran dayanışma platformu",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#047857",
+  "lang": "tr",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
